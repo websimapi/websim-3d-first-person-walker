@@ -3,9 +3,21 @@ import { PointerLockControls } from 'https://cdn.skypack.dev/three@0.132.2/examp
 
 class Game {
   constructor() {
+    // Base pixel size for consistent noise across all textures
+    this.PIXEL_SIZE = 4;
+    this.TEXTURE_SIZE = 64; // Base texture size that will be scaled
+
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    this.renderer = new THREE.WebGLRenderer();
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: false,
+      preserveDrawingBuffer: true
+    });
+    
+    // Force pixel perfect rendering
+    this.renderer.setPixelRatio(1);
+    this.renderer.outputEncoding = THREE.LinearEncoding;
+
     this.controls = null;
     this.moveForward = false;
     this.moveBackward = false;
@@ -14,33 +26,55 @@ class Game {
     this.velocity = new THREE.Vector3();
     this.direction = new THREE.Vector3();
     this.prevTime = performance.now();
-    this.objects = []; // Store references to objects that need texture updates
-    this.noiseCanvases = new Map(); // Store canvas references for each texture
+    this.objects = [];
+    this.noiseCanvases = new Map();
+    this.lastPosition = new THREE.Vector3();
+    this.lastRotation = new THREE.Euler();
+    this.needsTextureUpdate = false;
 
     this.init();
     this.setupWorld();
     this.animate();
   }
 
-  createNoiseTexture(width = 256, height = 256) {
+  createNoiseTexture(isStatic = false) {
     const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext('2d');
-    const imageData = context.createImageData(width, height);
+    canvas.width = this.TEXTURE_SIZE;
+    canvas.height = this.TEXTURE_SIZE;
+    const context = canvas.getContext('2d', { alpha: false });
+    context.imageSmoothingEnabled = false;
+    
+    const imageData = context.createImageData(this.TEXTURE_SIZE, this.TEXTURE_SIZE);
     const data = imageData.data;
 
-    for (let i = 0; i < data.length; i += 4) {
-      const value = Math.random() < 0.5 ? 0 : 255;
-      data[i] = value;     // red
-      data[i + 1] = value; // green
-      data[i + 2] = value; // blue
-      data[i + 3] = 255;   // alpha
+    // Generate noise at the pixel size level
+    for (let y = 0; y < this.TEXTURE_SIZE; y += this.PIXEL_SIZE) {
+      for (let x = 0; x < this.TEXTURE_SIZE; x += this.PIXEL_SIZE) {
+        const value = Math.random() < 0.5 ? 0 : 255;
+        // Fill the pixel block
+        for (let py = 0; py < this.PIXEL_SIZE && (y + py) < this.TEXTURE_SIZE; py++) {
+          for (let px = 0; px < this.PIXEL_SIZE && (x + px) < this.TEXTURE_SIZE; px++) {
+            const idx = ((y + py) * this.TEXTURE_SIZE + (x + px)) * 4;
+            data[idx] = value;     // R
+            data[idx + 1] = value; // G
+            data[idx + 2] = value; // B
+            data[idx + 3] = 255;   // A
+          }
+        }
+      }
     }
 
     context.putImageData(imageData, 0, 0);
+    
     const texture = new THREE.CanvasTexture(canvas);
-    this.noiseCanvases.set(texture, canvas); // Store the canvas reference
+    texture.magFilter = THREE.NearestFilter;
+    texture.minFilter = THREE.NearestFilter;
+    texture.generateMipmaps = false;
+    
+    if (!isStatic) {
+      this.noiseCanvases.set(texture, canvas);
+    }
+    
     return texture;
   }
 
@@ -48,16 +82,27 @@ class Game {
     const canvas = this.noiseCanvases.get(texture);
     if (!canvas) return;
     
-    const context = canvas.getContext('2d');
-    const imageData = context.createImageData(canvas.width, canvas.height);
+    const context = canvas.getContext('2d', { alpha: false });
+    context.imageSmoothingEnabled = false;
+    
+    const imageData = context.createImageData(this.TEXTURE_SIZE, this.TEXTURE_SIZE);
     const data = imageData.data;
 
-    for (let i = 0; i < data.length; i += 4) {
-      const value = Math.random() < 0.5 ? 0 : 255;
-      data[i] = value;     // red
-      data[i + 1] = value; // green
-      data[i + 2] = value; // blue
-      data[i + 3] = 255;   // alpha
+    // Update noise at the pixel size level
+    for (let y = 0; y < this.TEXTURE_SIZE; y += this.PIXEL_SIZE) {
+      for (let x = 0; x < this.TEXTURE_SIZE; x += this.PIXEL_SIZE) {
+        const value = Math.random() < 0.5 ? 0 : 255;
+        // Fill the pixel block
+        for (let py = 0; py < this.PIXEL_SIZE && (y + py) < this.TEXTURE_SIZE; py++) {
+          for (let px = 0; px < this.PIXEL_SIZE && (x + px) < this.TEXTURE_SIZE; px++) {
+            const idx = ((y + py) * this.TEXTURE_SIZE + (x + px)) * 4;
+            data[idx] = value;     // R
+            data[idx + 1] = value; // G
+            data[idx + 2] = value; // B
+            data[idx + 3] = 255;   // A
+          }
+        }
+      }
     }
 
     context.putImageData(imageData, 0, 0);
@@ -85,44 +130,46 @@ class Game {
   }
 
   setupWorld() {
-    // Create noise texture for background
-    const bgNoiseTexture = this.createNoiseTexture(1024, 1024);
+    // Create static background noise
+    const bgNoiseTexture = this.createNoiseTexture(true);
     bgNoiseTexture.wrapS = THREE.RepeatWrapping;
     bgNoiseTexture.wrapT = THREE.RepeatWrapping;
-    
+    bgNoiseTexture.repeat.set(4, 4); // Adjust the repeat to match visual scale
     this.scene.background = bgNoiseTexture;
 
-    // Add lights
-    const ambientLight = new THREE.AmbientLight(0x404040);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
     this.scene.add(ambientLight);
+    
     const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
     directionalLight.position.set(1, 1, 1);
     this.scene.add(directionalLight);
 
-    // Add some cubes with noise texture
     for (let i = 0; i < 20; i++) {
       const geometry = new THREE.BoxGeometry();
-      const noiseTexture = this.createNoiseTexture(256, 256);
+      const noiseTexture = this.createNoiseTexture();
       const material = new THREE.MeshStandardMaterial({ 
         map: noiseTexture,
-        roughness: 0.7,
-        metalness: 0.3
+        roughness: 0.9,
+        metalness: 0.1,
+        envMapIntensity: 0.5
       });
+      
       const cube = new THREE.Mesh(geometry, material);
       cube.position.x = Math.random() * 16 - 8;
       cube.position.y = 0.5;
       cube.position.z = Math.random() * 16 - 8;
+      cube.rotation.y = Math.random() * Math.PI * 2;
       this.scene.add(cube);
       
-      // Store the object and its texture for updates
       this.objects.push({
         mesh: cube,
         texture: noiseTexture
       });
     }
 
-    // Set initial camera position
-    this.camera.position.y = 1.6; // Average human height
+    this.camera.position.y = 1.6;
+    this.lastPosition.copy(this.camera.position);
+    this.lastRotation.copy(this.camera.rotation);
   }
 
   onKeyDown(event) {
@@ -189,21 +236,26 @@ class Game {
     this.controls.moveRight(-this.velocity.x * delta);
     this.controls.moveForward(-this.velocity.z * delta);
 
+    if (!this.camera.position.equals(this.lastPosition) || 
+        !this.camera.rotation.equals(this.lastRotation)) {
+      this.needsTextureUpdate = true;
+      this.lastPosition.copy(this.camera.position);
+      this.lastRotation.copy(this.camera.rotation);
+    }
+
     this.prevTime = time;
   }
 
   updateNoiseTextures() {
-    // Update background noise
-    if (this.scene.background) {
-      this.updateNoiseTexture(this.scene.background);
-    }
+    if (!this.needsTextureUpdate) return;
     
-    // Update all object textures
     for (const obj of this.objects) {
       if (obj.texture) {
         this.updateNoiseTexture(obj.texture);
       }
     }
+    
+    this.needsTextureUpdate = false;
   }
 
   animate() {
@@ -213,12 +265,9 @@ class Game {
       this.updateMovement();
     }
     
-    // Update all noise textures every frame
     this.updateNoiseTextures();
-    
     this.renderer.render(this.scene, this.camera);
   }
 }
 
-// Start the game
 new Game();
