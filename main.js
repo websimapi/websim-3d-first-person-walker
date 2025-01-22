@@ -82,22 +82,6 @@ class Game {
     directionalLight.position.set(1, 1, 1);
     this.scene.add(directionalLight);
 
-    // Create floor with noise texture
-    const floorNoiseTexture = this.createNoiseTexture(512, 512);
-    floorNoiseTexture.wrapS = THREE.RepeatWrapping;
-    floorNoiseTexture.wrapT = THREE.RepeatWrapping;
-    floorNoiseTexture.repeat.set(10, 10);
-
-    const floorGeometry = new THREE.PlaneGeometry(20, 20);
-    const floorMaterial = new THREE.MeshStandardMaterial({ 
-      map: floorNoiseTexture,
-      roughness: 0.8,
-      metalness: 0.2
-    });
-    const floor = new THREE.Mesh(floorGeometry, floorMaterial);
-    floor.rotation.x = -Math.PI / 2;
-    this.scene.add(floor);
-
     // Add some random cubes
     for (let i = 0; i < 20; i++) {
       const geometry = new THREE.BoxGeometry();
