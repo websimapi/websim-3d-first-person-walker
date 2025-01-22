@@ -15,6 +15,7 @@ class Game {
     this.direction = new THREE.Vector3();
     this.prevTime = performance.now();
     this.objects = []; // Store references to objects that need texture updates
+    this.noiseCanvases = new Map(); // Store canvas references for each texture
 
     this.init();
     this.setupWorld();
@@ -38,11 +39,15 @@ class Game {
     }
 
     context.putImageData(imageData, 0, 0);
-    return new THREE.CanvasTexture(canvas);
+    const texture = new THREE.CanvasTexture(canvas);
+    this.noiseCanvases.set(texture, canvas); // Store the canvas reference
+    return texture;
   }
 
   updateNoiseTexture(texture) {
-    const canvas = texture.source.data;
+    const canvas = this.noiseCanvases.get(texture);
+    if (!canvas) return;
+    
     const context = canvas.getContext('2d');
     const imageData = context.createImageData(canvas.width, canvas.height);
     const data = imageData.data;
@@ -85,13 +90,6 @@ class Game {
     bgNoiseTexture.wrapS = THREE.RepeatWrapping;
     bgNoiseTexture.wrapT = THREE.RepeatWrapping;
     
-    // Create background scene
-    const bgGeometry = new THREE.PlaneGeometry(2, 2);
-    const bgMaterial = new THREE.MeshBasicMaterial({ map: bgNoiseTexture });
-    const bgScene = new THREE.Scene();
-    const bgCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, -1, 1);
-    const background = new THREE.Mesh(bgGeometry, bgMaterial);
-    bgScene.add(background);
     this.scene.background = bgNoiseTexture;
 
     // Add lights
@@ -196,11 +194,15 @@ class Game {
 
   updateNoiseTextures() {
     // Update background noise
-    this.updateNoiseTexture(this.scene.background);
+    if (this.scene.background) {
+      this.updateNoiseTexture(this.scene.background);
+    }
     
     // Update all object textures
     for (const obj of this.objects) {
-      this.updateNoiseTexture(obj.texture);
+      if (obj.texture) {
+        this.updateNoiseTexture(obj.texture);
+      }
     }
   }
 
