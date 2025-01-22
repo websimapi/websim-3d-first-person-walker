@@ -20,6 +20,26 @@ class Game {
     this.animate();
   }
 
+  createNoiseTexture(width = 256, height = 256) {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    const imageData = context.createImageData(width, height);
+    const data = imageData.data;
+
+    for (let i = 0; i < data.length; i += 4) {
+      const value = Math.random() < 0.5 ? 0 : 255;
+      data[i] = value;     // red
+      data[i + 1] = value; // green
+      data[i + 2] = value; // blue
+      data[i + 3] = 255;   // alpha
+    }
+
+    context.putImageData(imageData, 0, 0);
+    return new THREE.CanvasTexture(canvas);
+  }
+
   init() {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(this.renderer.domElement);
@@ -41,6 +61,20 @@ class Game {
   }
 
   setupWorld() {
+    // Create noise texture for background
+    const bgNoiseTexture = this.createNoiseTexture(1024, 1024);
+    bgNoiseTexture.wrapS = THREE.RepeatWrapping;
+    bgNoiseTexture.wrapT = THREE.RepeatWrapping;
+    
+    // Create background scene
+    const bgGeometry = new THREE.PlaneGeometry(2, 2);
+    const bgMaterial = new THREE.MeshBasicMaterial({ map: bgNoiseTexture });
+    const bgScene = new THREE.Scene();
+    const bgCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, -1, 1);
+    const background = new THREE.Mesh(bgGeometry, bgMaterial);
+    bgScene.add(background);
+    this.scene.background = bgNoiseTexture;
+
     // Add lights
     const ambientLight = new THREE.AmbientLight(0x404040);
     this.scene.add(ambientLight);
@@ -48,10 +82,15 @@ class Game {
     directionalLight.position.set(1, 1, 1);
     this.scene.add(directionalLight);
 
-    // Create floor
+    // Create floor with noise texture
+    const floorNoiseTexture = this.createNoiseTexture(512, 512);
+    floorNoiseTexture.wrapS = THREE.RepeatWrapping;
+    floorNoiseTexture.wrapT = THREE.RepeatWrapping;
+    floorNoiseTexture.repeat.set(10, 10);
+
     const floorGeometry = new THREE.PlaneGeometry(20, 20);
     const floorMaterial = new THREE.MeshStandardMaterial({ 
-      color: 0x808080,
+      map: floorNoiseTexture,
       roughness: 0.8,
       metalness: 0.2
     });
