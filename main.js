@@ -3,7 +3,7 @@ import { PointerLockControls } from 'https://cdn.skypack.dev/three@0.132.2/examp
 
 class Game {
   constructor() {
-    this.PIXEL_SIZE = 1; 
+    this.PIXEL_SIZE = 4; 
     this.TEXTURE_SIZE = 256; 
     this.ROOM_SIZE = 50; 
 
@@ -19,8 +19,12 @@ class Game {
 
     this.setupBasics();
     this.setupRoom();
-    this.setupObjects(); 
+    this.setupObjects();
     this.animate();
+
+    setInterval(() => {
+      this.needsTextureUpdate = true;
+    }, 100);
   }
 
   setupBasics() {
@@ -82,12 +86,16 @@ class Game {
   createSlidingNoiseTexture() {
     const texture = this.createStaticNoiseTexture();
     texture.isSliding = true;
-    texture.pixels = new Uint8Array(this.TEXTURE_SIZE * this.TEXTURE_SIZE);
+    texture.pixels = new Uint8Array((this.TEXTURE_SIZE * this.TEXTURE_SIZE) / (this.PIXEL_SIZE * this.PIXEL_SIZE));
     
     const context = texture.canvas.getContext('2d');
     const imageData = context.getImageData(0, 0, this.TEXTURE_SIZE, this.TEXTURE_SIZE);
-    for (let i = 0; i < this.TEXTURE_SIZE * this.TEXTURE_SIZE; i++) {
-      texture.pixels[i] = imageData.data[i * 4] > 127 ? 1 : 0;
+    
+    let pixelIndex = 0;
+    for (let y = 0; y < this.TEXTURE_SIZE; y += this.PIXEL_SIZE) {
+      for (let x = 0; x < this.TEXTURE_SIZE; x += this.PIXEL_SIZE) {
+        texture.pixels[pixelIndex++] = imageData.data[(y * this.TEXTURE_SIZE + x) * 4] > 127 ? 1 : 0;
+      }
     }
     
     return texture;
@@ -97,24 +105,31 @@ class Game {
     const context = texture.canvas.getContext('2d');
     const imageData = context.createImageData(this.TEXTURE_SIZE, this.TEXTURE_SIZE);
     const data = imageData.data;
-    const newPixels = new Uint8Array(this.TEXTURE_SIZE * this.TEXTURE_SIZE);
+    const pixelsPerRow = this.TEXTURE_SIZE / this.PIXEL_SIZE;
+    const newPixels = new Uint8Array(texture.pixels.length);
 
-    for (let y = 0; y < this.TEXTURE_SIZE; y++) {
-      for (let x = 0; x < this.TEXTURE_SIZE; x++) {
-        const idx = y * this.TEXTURE_SIZE + x;
-        
-        if (Math.random() < 0.5) {
-          const nx = (x + 1) % this.TEXTURE_SIZE;
-          const neighborIdx = y * this.TEXTURE_SIZE + nx;
-          newPixels[idx] = texture.pixels[neighborIdx];
-        } else {
-          newPixels[idx] = Math.random() < 0.5 ? 1 : 0;
+    for (let i = 0; i < texture.pixels.length; i++) {
+      const x = (i % pixelsPerRow);
+      const y = Math.floor(i / pixelsPerRow);
+      
+      if (Math.random() < 0.5) {
+        const nx = (x + 1) % pixelsPerRow;
+        const neighborIdx = y * pixelsPerRow + nx;
+        newPixels[i] = texture.pixels[neighborIdx];
+      } else {
+        newPixels[i] = Math.random() < 0.5 ? 1 : 0;
+      }
+      
+      const value = newPixels[i] * 255;
+      const baseX = x * this.PIXEL_SIZE;
+      const baseY = y * this.PIXEL_SIZE;
+      
+      for (let py = 0; py < this.PIXEL_SIZE; py++) {
+        for (let px = 0; px < this.PIXEL_SIZE; px++) {
+          const idx = ((baseY + py) * this.TEXTURE_SIZE + (baseX + px)) * 4;
+          data[idx] = data[idx + 1] = data[idx + 2] = value;
+          data[idx + 3] = 255;
         }
-
-        const value = newPixels[idx] * 255;
-        const dataIdx = idx * 4;
-        data[dataIdx] = data[dataIdx + 1] = data[dataIdx + 2] = value;
-        data[dataIdx + 3] = 255;
       }
     }
 
@@ -126,7 +141,6 @@ class Game {
   setupRoom() {
     const size = this.ROOM_SIZE;
     const geometry = new THREE.BoxGeometry(size, size, size);
-    geometry.scale(1, 1, 1); 
     
     const materials = [];
     for (let i = 0; i < 6; i++) {
