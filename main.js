@@ -14,6 +14,7 @@ class Game {
     this.velocity = new THREE.Vector3();
     this.direction = new THREE.Vector3();
     this.prevTime = performance.now();
+    this.objects = []; // Store references to objects that need texture updates
 
     this.init();
     this.setupWorld();
@@ -38,6 +39,24 @@ class Game {
 
     context.putImageData(imageData, 0, 0);
     return new THREE.CanvasTexture(canvas);
+  }
+
+  updateNoiseTexture(texture) {
+    const canvas = texture.source.data;
+    const context = canvas.getContext('2d');
+    const imageData = context.createImageData(canvas.width, canvas.height);
+    const data = imageData.data;
+
+    for (let i = 0; i < data.length; i += 4) {
+      const value = Math.random() < 0.5 ? 0 : 255;
+      data[i] = value;     // red
+      data[i + 1] = value; // green
+      data[i + 2] = value; // blue
+      data[i + 3] = 255;   // alpha
+    }
+
+    context.putImageData(imageData, 0, 0);
+    texture.needsUpdate = true;
   }
 
   init() {
@@ -82,11 +101,12 @@ class Game {
     directionalLight.position.set(1, 1, 1);
     this.scene.add(directionalLight);
 
-    // Add some random cubes
+    // Add some cubes with noise texture
     for (let i = 0; i < 20; i++) {
       const geometry = new THREE.BoxGeometry();
+      const noiseTexture = this.createNoiseTexture(256, 256);
       const material = new THREE.MeshStandardMaterial({ 
-        color: Math.random() * 0xffffff,
+        map: noiseTexture,
         roughness: 0.7,
         metalness: 0.3
       });
@@ -95,6 +115,12 @@ class Game {
       cube.position.y = 0.5;
       cube.position.z = Math.random() * 16 - 8;
       this.scene.add(cube);
+      
+      // Store the object and its texture for updates
+      this.objects.push({
+        mesh: cube,
+        texture: noiseTexture
+      });
     }
 
     // Set initial camera position
@@ -168,12 +194,25 @@ class Game {
     this.prevTime = time;
   }
 
+  updateNoiseTextures() {
+    // Update background noise
+    this.updateNoiseTexture(this.scene.background);
+    
+    // Update all object textures
+    for (const obj of this.objects) {
+      this.updateNoiseTexture(obj.texture);
+    }
+  }
+
   animate() {
     requestAnimationFrame(() => this.animate());
     
     if (this.controls.isLocked) {
       this.updateMovement();
     }
+    
+    // Update all noise textures every frame
+    this.updateNoiseTextures();
     
     this.renderer.render(this.scene, this.camera);
   }
