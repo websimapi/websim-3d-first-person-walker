@@ -3,8 +3,8 @@ import { PointerLockControls } from 'https://cdn.skypack.dev/three@0.132.2/examp
 
 class Game {
   constructor() {
-    this.PIXEL_SIZE = 4; 
-    this.TEXTURE_SIZE = 256; 
+    this.PIXEL_SIZE = 2; 
+    this.TEXTURE_SIZE = 128; 
     this.ROOM_SIZE = 50; 
 
     this.scene = new THREE.Scene();
@@ -18,13 +18,12 @@ class Game {
     this.renderer.outputEncoding = THREE.LinearEncoding;
 
     this.setupBasics();
-    this.setupRoom();
     this.setupObjects();
     this.animate();
 
     setInterval(() => {
       this.needsTextureUpdate = true;
-    }, 100);
+    }, 50); 
   }
 
   setupBasics() {
@@ -38,6 +37,7 @@ class Game {
     this.prevTime = performance.now();
     this.needsTextureUpdate = false;
 
+    this.scene.background = new THREE.Color(0x000000); 
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(this.renderer.domElement);
 
@@ -49,7 +49,7 @@ class Game {
     window.addEventListener('resize', () => this.handleResize());
   }
 
-  createStaticNoiseTexture() {
+  createSlidingNoiseTexture() {
     const canvas = document.createElement('canvas');
     canvas.width = this.TEXTURE_SIZE;
     canvas.height = this.TEXTURE_SIZE;
@@ -79,22 +79,13 @@ class Game {
     texture.minFilter = THREE.NearestFilter;
     texture.generateMipmaps = false;
     texture.canvas = canvas;
-    
-    return texture;
-  }
-
-  createSlidingNoiseTexture() {
-    const texture = this.createStaticNoiseTexture();
-    texture.isSliding = true;
     texture.pixels = new Uint8Array((this.TEXTURE_SIZE * this.TEXTURE_SIZE) / (this.PIXEL_SIZE * this.PIXEL_SIZE));
     
-    const context = texture.canvas.getContext('2d');
-    const imageData = context.getImageData(0, 0, this.TEXTURE_SIZE, this.TEXTURE_SIZE);
-    
     let pixelIndex = 0;
+    const initialData = context.getImageData(0, 0, this.TEXTURE_SIZE, this.TEXTURE_SIZE);
     for (let y = 0; y < this.TEXTURE_SIZE; y += this.PIXEL_SIZE) {
       for (let x = 0; x < this.TEXTURE_SIZE; x += this.PIXEL_SIZE) {
-        texture.pixels[pixelIndex++] = imageData.data[(y * this.TEXTURE_SIZE + x) * 4] > 127 ? 1 : 0;
+        texture.pixels[pixelIndex++] = initialData.data[(y * this.TEXTURE_SIZE + x) * 4] > 127 ? 1 : 0;
       }
     }
     
@@ -138,38 +129,12 @@ class Game {
     texture.needsUpdate = true;
   }
 
-  setupRoom() {
-    const size = this.ROOM_SIZE;
-    const geometry = new THREE.BoxGeometry(size, size, size);
-    
-    const materials = [];
-    for (let i = 0; i < 6; i++) {
-      const texture = this.createStaticNoiseTexture();
-      materials.push(new THREE.MeshStandardMaterial({
-        map: texture,
-        side: THREE.BackSide,
-        roughness: 0.9,
-        metalness: 0.1
-      }));
-    }
-
-    const room = new THREE.Mesh(geometry, materials);
-    this.scene.add(room);
-
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
-    this.scene.add(ambientLight);
-    
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
-    directionalLight.position.set(1, 1, 1);
-    this.scene.add(directionalLight);
-
-    this.camera.position.set(0, 0, 0);
-  }
-
   setupObjects() {
     this.objectTextures = [];
+    const light = new THREE.AmbientLight(0xffffff, 1);
+    this.scene.add(light);
     
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 10; i++) {
       const size = 3;
       const geometry = new THREE.BoxGeometry(size, size, size);
       const texture = this.createSlidingNoiseTexture();
@@ -182,11 +147,13 @@ class Game {
       });
 
       const cube = new THREE.Mesh(geometry, material);
-      cube.position.x = Math.random() * 20 - 10;
-      cube.position.y = Math.random() * 20 - 10;
-      cube.position.z = Math.random() * 20 - 10;
+      cube.position.x = Math.random() * 40 - 20;
+      cube.position.y = Math.random() * 40 - 20;
+      cube.position.z = Math.random() * 40 - 20;
       this.scene.add(cube);
     }
+
+    this.camera.position.set(0, 0, 10);
   }
 
   handleResize() {
@@ -248,7 +215,7 @@ class Game {
     this.direction.x = Number(this.moveRight) - Number(this.moveLeft);
     this.direction.normalize();
 
-    const speed = 5.0;
+    const speed = 15.0;
     if (this.moveForward || this.moveBackward) {
       this.velocity.z -= this.direction.z * speed * delta;
     }
