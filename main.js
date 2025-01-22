@@ -3,9 +3,9 @@ import { PointerLockControls } from 'https://cdn.skypack.dev/three@0.132.2/examp
 
 class Game {
   constructor() {
-    // Base pixel size for consistent noise across all textures
-    this.PIXEL_SIZE = 4;
-    this.TEXTURE_SIZE = 64; // Base texture size that will be scaled
+    this.PIXEL_SIZE = 2; 
+    this.TEXTURE_SIZE = 128; 
+    this.ROOM_SIZE = 20;
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -14,10 +14,15 @@ class Game {
       preserveDrawingBuffer: true
     });
     
-    // Force pixel perfect rendering
     this.renderer.setPixelRatio(1);
     this.renderer.outputEncoding = THREE.LinearEncoding;
 
+    this.setupBasics();
+    this.setupRoom();
+    this.animate();
+  }
+
+  setupBasics() {
     this.controls = null;
     this.moveForward = false;
     this.moveBackward = false;
@@ -26,18 +31,23 @@ class Game {
     this.velocity = new THREE.Vector3();
     this.direction = new THREE.Vector3();
     this.prevTime = performance.now();
-    this.objects = [];
-    this.noiseCanvases = new Map();
+    this.noiseTextures = [];
     this.lastPosition = new THREE.Vector3();
     this.lastRotation = new THREE.Euler();
     this.needsTextureUpdate = false;
 
-    this.init();
-    this.setupWorld();
-    this.animate();
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(this.renderer.domElement);
+
+    this.controls = new PointerLockControls(this.camera, document.body);
+
+    document.addEventListener('click', () => this.controls.lock());
+    document.addEventListener('keydown', (event) => this.onKeyDown(event));
+    document.addEventListener('keyup', (event) => this.onKeyUp(event));
+    window.addEventListener('resize', () => this.handleResize());
   }
 
-  createNoiseTexture(isStatic = false) {
+  createNoiseTexture() {
     const canvas = document.createElement('canvas');
     canvas.width = this.TEXTURE_SIZE;
     canvas.height = this.TEXTURE_SIZE;
@@ -47,18 +57,14 @@ class Game {
     const imageData = context.createImageData(this.TEXTURE_SIZE, this.TEXTURE_SIZE);
     const data = imageData.data;
 
-    // Generate noise at the pixel size level
     for (let y = 0; y < this.TEXTURE_SIZE; y += this.PIXEL_SIZE) {
       for (let x = 0; x < this.TEXTURE_SIZE; x += this.PIXEL_SIZE) {
         const value = Math.random() < 0.5 ? 0 : 255;
-        // Fill the pixel block
         for (let py = 0; py < this.PIXEL_SIZE && (y + py) < this.TEXTURE_SIZE; py++) {
           for (let px = 0; px < this.PIXEL_SIZE && (x + px) < this.TEXTURE_SIZE; px++) {
             const idx = ((y + py) * this.TEXTURE_SIZE + (x + px)) * 4;
-            data[idx] = value;     // R
-            data[idx + 1] = value; // G
-            data[idx + 2] = value; // B
-            data[idx + 3] = 255;   // A
+            data[idx] = data[idx + 1] = data[idx + 2] = value;
+            data[idx + 3] = 255;
           }
         }
       }
@@ -70,36 +76,24 @@ class Game {
     texture.magFilter = THREE.NearestFilter;
     texture.minFilter = THREE.NearestFilter;
     texture.generateMipmaps = false;
-    
-    if (!isStatic) {
-      this.noiseCanvases.set(texture, canvas);
-    }
+    texture.canvas = canvas;
     
     return texture;
   }
 
   updateNoiseTexture(texture) {
-    const canvas = this.noiseCanvases.get(texture);
-    if (!canvas) return;
-    
-    const context = canvas.getContext('2d', { alpha: false });
-    context.imageSmoothingEnabled = false;
-    
+    const context = texture.canvas.getContext('2d', { alpha: false });
     const imageData = context.createImageData(this.TEXTURE_SIZE, this.TEXTURE_SIZE);
     const data = imageData.data;
 
-    // Update noise at the pixel size level
     for (let y = 0; y < this.TEXTURE_SIZE; y += this.PIXEL_SIZE) {
       for (let x = 0; x < this.TEXTURE_SIZE; x += this.PIXEL_SIZE) {
         const value = Math.random() < 0.5 ? 0 : 255;
-        // Fill the pixel block
         for (let py = 0; py < this.PIXEL_SIZE && (y + py) < this.TEXTURE_SIZE; py++) {
           for (let px = 0; px < this.PIXEL_SIZE && (x + px) < this.TEXTURE_SIZE; px++) {
             const idx = ((y + py) * this.TEXTURE_SIZE + (x + px)) * 4;
-            data[idx] = value;     // R
-            data[idx + 1] = value; // G
-            data[idx + 2] = value; // B
-            data[idx + 3] = 255;   // A
+            data[idx] = data[idx + 1] = data[idx + 2] = value;
+            data[idx + 3] = 255;
           }
         }
       }
@@ -109,33 +103,25 @@ class Game {
     texture.needsUpdate = true;
   }
 
-  init() {
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
-    document.body.appendChild(this.renderer.domElement);
+  setupRoom() {
+    const size = this.ROOM_SIZE;
+    const geometry = new THREE.BoxGeometry(size, size, size);
+    geometry.scale(1, 1, 1); 
+    
+    const materials = [];
+    for (let i = 0; i < 6; i++) {
+      const texture = this.createNoiseTexture();
+      this.noiseTextures.push(texture);
+      materials.push(new THREE.MeshStandardMaterial({
+        map: texture,
+        side: THREE.BackSide,
+        roughness: 0.9,
+        metalness: 0.1
+      }));
+    }
 
-    this.controls = new PointerLockControls(this.camera, document.body);
-
-    document.addEventListener('click', () => {
-      this.controls.lock();
-    });
-
-    document.addEventListener('keydown', (event) => this.onKeyDown(event));
-    document.addEventListener('keyup', (event) => this.onKeyUp(event));
-
-    window.addEventListener('resize', () => {
-      this.camera.aspect = window.innerWidth / window.innerHeight;
-      this.camera.updateProjectionMatrix();
-      this.renderer.setSize(window.innerWidth, window.innerHeight);
-    });
-  }
-
-  setupWorld() {
-    // Create static background noise
-    const bgNoiseTexture = this.createNoiseTexture(true);
-    bgNoiseTexture.wrapS = THREE.RepeatWrapping;
-    bgNoiseTexture.wrapT = THREE.RepeatWrapping;
-    bgNoiseTexture.repeat.set(4, 4); // Adjust the repeat to match visual scale
-    this.scene.background = bgNoiseTexture;
+    const room = new THREE.Mesh(geometry, materials);
+    this.scene.add(room);
 
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
     this.scene.add(ambientLight);
@@ -144,32 +130,15 @@ class Game {
     directionalLight.position.set(1, 1, 1);
     this.scene.add(directionalLight);
 
-    for (let i = 0; i < 20; i++) {
-      const geometry = new THREE.BoxGeometry();
-      const noiseTexture = this.createNoiseTexture();
-      const material = new THREE.MeshStandardMaterial({ 
-        map: noiseTexture,
-        roughness: 0.9,
-        metalness: 0.1,
-        envMapIntensity: 0.5
-      });
-      
-      const cube = new THREE.Mesh(geometry, material);
-      cube.position.x = Math.random() * 16 - 8;
-      cube.position.y = 0.5;
-      cube.position.z = Math.random() * 16 - 8;
-      cube.rotation.y = Math.random() * Math.PI * 2;
-      this.scene.add(cube);
-      
-      this.objects.push({
-        mesh: cube,
-        texture: noiseTexture
-      });
-    }
-
-    this.camera.position.y = 1.6;
+    this.camera.position.set(0, 0, 0);
     this.lastPosition.copy(this.camera.position);
     this.lastRotation.copy(this.camera.rotation);
+  }
+
+  handleResize() {
+    this.camera.aspect = window.innerWidth / window.innerHeight;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
   }
 
   onKeyDown(event) {
@@ -249,10 +218,8 @@ class Game {
   updateNoiseTextures() {
     if (!this.needsTextureUpdate) return;
     
-    for (const obj of this.objects) {
-      if (obj.texture) {
-        this.updateNoiseTexture(obj.texture);
-      }
+    for (const texture of this.noiseTextures) {
+      this.updateNoiseTexture(texture);
     }
     
     this.needsTextureUpdate = false;
