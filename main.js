@@ -1,12 +1,48 @@
 import * as THREE from 'https://cdn.skypack.dev/three@0.132.2';
 import { PointerLockControls } from 'https://cdn.skypack.dev/three@0.132.2/examples/jsm/controls/PointerLockControls.js';
 
+const vertexShader = `
+  varying vec2 vUv;
+  
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const fragmentShader = `
+  uniform float time;
+  uniform float pixelSize;
+  uniform bool isAnimated;
+  varying vec2 vUv;
+
+  // Pseudo-random function
+  float random(vec2 st) {
+    return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123);
+  }
+
+  void main() {
+    // Create pixelated coordinates
+    vec2 pixelatedUv = floor(vUv * 64.0) / 64.0;
+    
+    float r;
+    if (isAnimated) {
+      // For animated objects, use time-based noise
+      r = random(pixelatedUv + vec2(time * 0.1));
+    } else {
+      // For static objects, use position-based noise
+      r = random(pixelatedUv);
+    }
+    
+    // Convert to black and white
+    vec3 color = vec3(step(0.5, r));
+    
+    gl_FragColor = vec4(color, 1.0);
+  }
+`;
+
 class Game {
   constructor() {
-    this.PIXEL_SIZE = 2; 
-    this.TEXTURE_SIZE = 128; 
-    this.ROOM_SIZE = 50; 
-
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
     this.renderer = new THREE.WebGLRenderer({
@@ -17,13 +53,10 @@ class Game {
     this.renderer.setPixelRatio(1);
     this.renderer.outputEncoding = THREE.LinearEncoding;
 
+    this.clock = new THREE.Clock();
     this.setupBasics();
     this.setupObjects();
     this.animate();
-
-    setInterval(() => {
-      this.needsTextureUpdate = true;
-    }, 50); 
   }
 
   setupBasics() {
@@ -35,9 +68,8 @@ class Game {
     this.velocity = new THREE.Vector3();
     this.direction = new THREE.Vector3();
     this.prevTime = performance.now();
-    this.needsTextureUpdate = false;
 
-    this.scene.background = new THREE.Color(0x000000); 
+    this.scene.background = new THREE.Color(0x000000);
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(this.renderer.domElement);
 
@@ -49,104 +81,27 @@ class Game {
     window.addEventListener('resize', () => this.handleResize());
   }
 
-  createSlidingNoiseTexture() {
-    const canvas = document.createElement('canvas');
-    canvas.width = this.TEXTURE_SIZE;
-    canvas.height = this.TEXTURE_SIZE;
-    const context = canvas.getContext('2d', { alpha: false });
-    context.imageSmoothingEnabled = false;
-    
-    const imageData = context.createImageData(this.TEXTURE_SIZE, this.TEXTURE_SIZE);
-    const data = imageData.data;
-
-    for (let y = 0; y < this.TEXTURE_SIZE; y += this.PIXEL_SIZE) {
-      for (let x = 0; x < this.TEXTURE_SIZE; x += this.PIXEL_SIZE) {
-        const value = Math.random() < 0.5 ? 0 : 255;
-        for (let py = 0; py < this.PIXEL_SIZE && (y + py) < this.TEXTURE_SIZE; py++) {
-          for (let px = 0; px < this.PIXEL_SIZE && (x + px) < this.TEXTURE_SIZE; px++) {
-            const idx = ((y + py) * this.TEXTURE_SIZE + (x + px)) * 4;
-            data[idx] = data[idx + 1] = data[idx + 2] = value;
-            data[idx + 3] = 255;
-          }
-        }
-      }
-    }
-
-    context.putImageData(imageData, 0, 0);
-    
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.magFilter = THREE.NearestFilter;
-    texture.minFilter = THREE.NearestFilter;
-    texture.generateMipmaps = false;
-    texture.canvas = canvas;
-    texture.pixels = new Uint8Array((this.TEXTURE_SIZE * this.TEXTURE_SIZE) / (this.PIXEL_SIZE * this.PIXEL_SIZE));
-    
-    let pixelIndex = 0;
-    const initialData = context.getImageData(0, 0, this.TEXTURE_SIZE, this.TEXTURE_SIZE);
-    for (let y = 0; y < this.TEXTURE_SIZE; y += this.PIXEL_SIZE) {
-      for (let x = 0; x < this.TEXTURE_SIZE; x += this.PIXEL_SIZE) {
-        texture.pixels[pixelIndex++] = initialData.data[(y * this.TEXTURE_SIZE + x) * 4] > 127 ? 1 : 0;
-      }
-    }
-    
-    return texture;
-  }
-
-  updateSlidingNoiseTexture(texture) {
-    const context = texture.canvas.getContext('2d');
-    const imageData = context.createImageData(this.TEXTURE_SIZE, this.TEXTURE_SIZE);
-    const data = imageData.data;
-    const pixelsPerRow = this.TEXTURE_SIZE / this.PIXEL_SIZE;
-    const newPixels = new Uint8Array(texture.pixels.length);
-
-    for (let i = 0; i < texture.pixels.length; i++) {
-      const x = (i % pixelsPerRow);
-      const y = Math.floor(i / pixelsPerRow);
-      
-      if (Math.random() < 0.5) {
-        const nx = (x + 1) % pixelsPerRow;
-        const neighborIdx = y * pixelsPerRow + nx;
-        newPixels[i] = texture.pixels[neighborIdx];
-      } else {
-        newPixels[i] = Math.random() < 0.5 ? 1 : 0;
-      }
-      
-      const value = newPixels[i] * 255;
-      const baseX = x * this.PIXEL_SIZE;
-      const baseY = y * this.PIXEL_SIZE;
-      
-      for (let py = 0; py < this.PIXEL_SIZE; py++) {
-        for (let px = 0; px < this.PIXEL_SIZE; px++) {
-          const idx = ((baseY + py) * this.TEXTURE_SIZE + (baseX + px)) * 4;
-          data[idx] = data[idx + 1] = data[idx + 2] = value;
-          data[idx + 3] = 255;
-        }
-      }
-    }
-
-    texture.pixels = newPixels;
-    context.putImageData(imageData, 0, 0);
-    texture.needsUpdate = true;
-  }
-
   setupObjects() {
-    this.objectTextures = [];
     const light = new THREE.AmbientLight(0xffffff, 1);
     this.scene.add(light);
     
+    // Create shader materials
+    const animatedMaterial = new THREE.ShaderMaterial({
+      vertexShader,
+      fragmentShader,
+      uniforms: {
+        time: { value: 0 },
+        pixelSize: { value: 2.0 },
+        isAnimated: { value: true }
+      }
+    });
+
+    // Create cubes with animated shader material
     for (let i = 0; i < 10; i++) {
       const size = 3;
       const geometry = new THREE.BoxGeometry(size, size, size);
-      const texture = this.createSlidingNoiseTexture();
-      this.objectTextures.push(texture);
+      const cube = new THREE.Mesh(geometry, animatedMaterial.clone());
       
-      const material = new THREE.MeshStandardMaterial({
-        map: texture,
-        roughness: 0.9,
-        metalness: 0.1
-      });
-
-      const cube = new THREE.Mesh(geometry, material);
       cube.position.x = Math.random() * 40 - 20;
       cube.position.y = Math.random() * 40 - 20;
       cube.position.z = Math.random() * 40 - 20;
@@ -229,13 +184,13 @@ class Game {
     this.prevTime = time;
   }
 
-  updateTextures() {
-    if (this.needsTextureUpdate) {
-      for (const texture of this.objectTextures) {
-        this.updateSlidingNoiseTexture(texture);
+  updateShaderUniforms() {
+    const time = this.clock.getElapsedTime();
+    this.scene.traverse((object) => {
+      if (object.isMesh && object.material.type === 'ShaderMaterial') {
+        object.material.uniforms.time.value = time;
       }
-      this.needsTextureUpdate = false;
-    }
+    });
   }
 
   animate() {
@@ -245,7 +200,7 @@ class Game {
       this.updateMovement();
     }
     
-    this.updateTextures();
+    this.updateShaderUniforms();
     this.renderer.render(this.scene, this.camera);
   }
 }
